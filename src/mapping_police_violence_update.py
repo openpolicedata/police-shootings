@@ -13,10 +13,10 @@ except:
     opd_csv_file = r"..\opd-data\opd_source_table.csv"
     opd.datasets.reload(opd_csv_file)
 
-from shootings_database.utils import address_parser
-from shootings_database.utils  import agencyutils
-from shootings_database.utils  import ois_matching
-from shootings_database.utils  import opd_logger
+from src.utils import address_parser
+from src.utils  import agencyutils
+from src.utils  import ois_matching
+from src.utils  import opd_logger
 import logging
 
 # Script for identifying police killing in OpenPoliceData (OPD) data not in MPV database.
