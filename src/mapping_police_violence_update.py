@@ -1,6 +1,5 @@
 import pandas as pd
 import os, sys
-from datetime import datetime
 file_loc = sys.path[0]
 sys.path.append(os.path.dirname(file_loc))  # Add current file directory to path
 
@@ -231,3 +230,8 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
             keys = ["MPV ID", 'type', 'known_fatal', 'OPD Date','OPD Agency','OPD Race', 'OPD Gender','OPD Age','OPD Address']
             # Save general data to global file containing data for all OPD datasets
             opd_logger.log(df_global, output_dir, global_basename, keys=keys, add_date=True, only_diffs=True)
+
+            opd_logger.log_possible_matches(output_dir, 'Possible_Matches', 
+                                            df_global, df_save, df_mpv, 
+                                            agency_partial, row_dataset['State'],
+                                            mpv_addr_col, addr_col, add_date=True)

@@ -3,10 +3,12 @@ import glob
 from hashlib import sha1
 import numpy as np
 import pandas as pd
+import re
 import os
 from typing import Optional
 import warnings
 from . import ois_matching
+from . import agencyutils
 
 def log(df: pd.DataFrame, 
         output_dir: str, 
@@ -45,11 +47,11 @@ def log(df: pd.DataFrame,
                 break
             df_old = pd.read_csv(f, keep_default_na=False, na_values={'',np.nan})
             def convert_to_int(x):
-                if isinstance(x,str):
+                if isinstance(x,str) and re.search(r'^[0-9\.]+$', x):
                     try:
                         if float(x)==int(float(x)):
                             x = int(float(x))
-                    except ValueError:
+                    except (ValueError, OverflowError):
                         pass
                 return x
             df_old = df_old.apply(lambda x: x.apply(convert_to_int))
@@ -106,7 +108,7 @@ def generate_general_output_data(df_save:pd.DataFrame, addr_col: str, name_col: 
     opd_race_col = ois_matching.get_race_col(df_save)
     opd_gender_col = ois_matching.get_gender_col(df_save)
     opd_age_col = ois_matching.get_age_col(df_save)
-    cols = ['type', 'known_fatal']
+    cols = ['OPD ID', 'type', 'known_fatal']
     for c in df_save.columns:
         if c.startswith("MPV"):
             cols.append(c)
@@ -186,10 +188,16 @@ def generate_agency_output_data(df_mpv_agency: pd.DataFrame,
     keys = []
     if len(df_opd)>0:
         df_opd['type'] = 'Unmatched'
+        df_opd['OPD ID'] = df_opd.apply(
+            lambda x: ''.join(x.astype(str)),axis=1).apply(lambda value: sha1(str(value).encode('utf-8')).hexdigest()[:10]
+            )
         df_save.append(df_opd)
 
     if log_demo_diffs and len(subject_demo_correction)>0:
         df = pd.DataFrame(subject_demo_correction).transpose()
+        df['OPD ID'] = df_opd.apply(
+            lambda x: ''.join(x.astype(str)),axis=1).apply(lambda value: sha1(str(value).encode('utf-8')).hexdigest()
+            )
         df['type'] = 'Demo Correction?'
         # Create hash of MPV row
         df['MPV Hash'] = df_mpv_agency.loc[df.index].apply(
@@ -208,6 +216,9 @@ def generate_agency_output_data(df_mpv_agency: pd.DataFrame,
     
     if log_age_diffs and len(match_with_age_diff)>0:
         df = pd.DataFrame(match_with_age_diff).transpose()
+        df['OPD ID'] = df_opd.apply(
+            lambda x: ''.join(x.astype(str)),axis=1).apply(lambda value: sha1(str(value).encode('utf-8')).hexdigest()
+            )
         df['type'] = 'Age Difference'
         # Create hash of MPV row
         df['MPV Hash'] = df_mpv_agency.loc[df.index].apply(
@@ -249,3 +260,113 @@ def generate_agency_output_data(df_mpv_agency: pd.DataFrame,
         df_save = df_save[new_cols]
 
     return df_save, keys
+
+def log_possible_matches(output_dir, base_name, df_global, df_all, df_mpv, 
+                         location, state,
+                         mpv_addr_col, addr_col, add_date=True):
+    """Log potential matches for each case to help users evaluate whether identified cases are actually not in the database
+
+    Parameters
+    ----------
+    output_dir : str
+        Output directory to save output file
+    base_name : str
+        Base filename. Today's date will be appended to it if add_date is True
+    df_global : pd.DataFrame
+        Table of global details for cases to log
+    df_all : pd.DataFrame
+        Table of all details for cases to log
+    df_mpv : pd.DataFrame
+        Table of MPV data
+    location: str
+        Location of agency
+    state: str
+        State of agency
+    mpv_addr_col: str
+        Address column in MPV data
+    addr_col: str
+        Address column in OPD data
+    add_date : bool, optional
+        Whether to append today's date to base_name, by default False
+    """
+
+    output_name = os.path.join(output_dir, base_name)
+    if add_date:
+        output_name+="_"+datetime.now().strftime('%Y%m%d')
+    output_name+='.txt'
+
+    df_mpv = df_mpv.rename(columns={mpv_addr_col:'ADDRESS'})
+
+    if addr_col:
+        df_all = df_all.rename(columns={addr_col:'ADDRESS'})
+
+    if not (is_period:=isinstance(df_all['DATE'].dtype, pd.PeriodDtype)):
+        df_all['DATE'] = pd.to_datetime(df_all['DATE'])
+
+    assert len(df_global) == len(df_all)
+
+    state_abbrev = agencyutils.state_abbrev(state)
+    out_cols = ['DATE', 'SUBJECT_NAME','ADDRESS','SUBJECT_RE_GROUP','SUBJECT_GENDER','SUBJECT_AGE','AGENCY','State','ZIP_CODE']
+    for k in range(len(df_global)):
+        row = df_global.iloc[k]
+        df_res = df_all.iloc[k].copy()
+        
+        df_res['State'] = state_abbrev
+        df_res['AGENCY'] = location
+
+        df_mpv_cur = df_mpv[df_mpv['AGENCY'].str.lower().str.contains(location.lower())]
+
+        assert len(df_mpv_cur)>0
+
+        if 'SUBJECT_AGE' not in df_res and 'SUBJECT_AGE_RANGE' in df_res:
+            df_res = df_res.rename(index={'SUBJECT_AGE_RANGE','SUBJECT_AGE'})
+
+        if is_period:
+            matches = df_mpv_cur['DATE'].apply(lambda x: df_res['DATE'].start_time <= x <= df_res['DATE'].end_time)
+            df_comp = pd.concat([df_res.to_frame().T, df_mpv_cur[matches]])
+        else:
+            if df_res['DATE'].tz:
+                df_res['DATE'] = df_res['DATE'].tz_convert(None)
+            off_by_month = (df_mpv_cur['DATE'].dt.year==df_res['DATE'].year) & \
+                    (df_mpv_cur['DATE'].dt.day==df_res['DATE'].day) & \
+                    ((df_mpv_cur['DATE'].dt.month-df_res['DATE'].month).abs()<=1)
+            date_matches = (df_mpv_cur['DATE'] - df_res['DATE']).abs() <'3d'
+
+            matches = off_by_month | date_matches
+            df_comp = pd.concat([df_res.to_frame().T, df_mpv_cur[matches]])
+
+            df_mpv_state = df_mpv[df_mpv['State'].str.contains(state_abbrev)]
+            df_mpv_state = df_mpv_state.drop(index=df_mpv_cur.index, errors='ignore')
+            off_by_month = (df_mpv_state['DATE'].dt.year==df_res['DATE'].year) & \
+                    (df_mpv_state['DATE'].dt.day==df_res['DATE'].day) & \
+                    ((df_mpv_state['DATE'].dt.month-df_res['DATE'].month).abs()<=1)
+            date_matches = (df_mpv_state['DATE'] - df_res['DATE']).abs() <'3d'
+
+            matches_state = off_by_month | date_matches
+            df_comp = pd.concat([df_comp, df_mpv_state[matches_state]])
+
+        index = df_comp.index.tolist()
+        index[0] = 'OPD'
+        df_comp.index = index
+
+        if not os.path.exists(output_name):
+            with open(output_name, 'w') as f:
+                f.write('Tables in this file are best viewed with an editor that will not automatically wrap text.\n')
+                f.write('Notepad or Notepad++ are recommended.\n')
+                f.write('If text is wrapped in Notepad or Notepad++, go to View > Word Wrap.\n\n')
+                f.write('If looking for a specific case, it is recommended to search using the OPD ID.\n\n\n')
+
+        with open(output_name, 'a') as f:
+            # to_markdown throws an error if pd.NA is used as NaN instead of np.nan
+            f.write('Details of Potential Update:\n\n')
+            f.write('Global Details:\n')
+            row.to_frame().T.to_markdown(f, index=False)
+
+            f.write('\n\nAll Details:\n')
+            df_res.to_frame().T.to_markdown(f, index=False)
+
+            f.write('\n\nPossible Matches:\n')
+            df_comp[out_cols].astype('O').fillna(np.nan).T.to_markdown(f)
+            f.write('\n\n----------------------------------------------------------------------------------------------------------------------------')
+            f.write('\n----------------------------------------------------------------------------------------------------------------------------')
+            f.write('\n----------------------------------------------------------------------------------------------------------------------------\n\n')
