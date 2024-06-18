@@ -319,7 +319,7 @@ def log_possible_matches(output_dir, base_name, df_global, df_all, df_mpv,
         assert len(df_mpv_cur)>0
 
         if 'SUBJECT_AGE' not in df_res and 'SUBJECT_AGE_RANGE' in df_res:
-            df_res = df_res.rename(index={'SUBJECT_AGE_RANGE','SUBJECT_AGE'})
+            df_res = df_res.rename(index={'SUBJECT_AGE_RANGE':'SUBJECT_AGE'})
 
         if is_period:
             matches = df_mpv_cur['DATE'].apply(lambda x: df_res['DATE'].start_time <= x <= df_res['DATE'].end_time)

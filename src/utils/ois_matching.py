@@ -41,6 +41,31 @@ gender_vals = opd.defs.get_gender_cats()
 gender_vals = gender_vals.values()
 
 @dataclass
+class Date_Matcher:
+    max_diff = None # If None, dates must match. Otherwise, dates will match if difference between dates is within this value
+    allow_month_error = False  # If True, dates will be also be considered to match if year and day are the same but the month is off by 1 (perhaps due to typo)
+
+    def match(self, dates, date_comp):
+        if self.max_diff:
+            test = in_date_range(dates, date_comp, self.max_diff)
+        else:
+            test = match_date(dates, date_comp)
+
+        if self.allow_month_error:
+            if isinstance(dates.dtype, pd.api.types.PeriodDtype):
+                raise NotImplementedError()
+            
+            year_matches = dates.dt.year == date_comp.year
+            day_matches = dates.dt.day == date_comp.day
+
+            test = test | (year_matches & day_matches & (
+                    abs(dates.dt.month - date_comp.month)==1   # Likely typo in month
+                    ))
+
+        return test
+
+
+@dataclass
 class OIS_Matcher:
     df_mpv_agency: pd.DataFrame  # Table of MPV data for agency corresponding to df_opd
     mpv_addr_col: str            # Address column in MPV data
@@ -49,7 +74,6 @@ class OIS_Matcher:
     location: Optional[str] = None  # Name of location (if known).
     # Whether to throw an error if previously unobserved conditions are found
     error: Literal['raise','ignore'] = 'ignore'
-
 
     def remove_name_matches(self,
                             df_opd: pd.DataFrame, 
@@ -166,7 +190,8 @@ class OIS_Matcher:
                                     subject_demo_correction: dict, 
                                     match_with_age_diff: dict, 
                                     args: list[dict],
-                                    test_cols: list[str]):
+                                    test_cols: list[str],
+                                    date_matcher: Date_Matcher=Date_Matcher()):
         """Loop over each row of df_mpv_agency to find cases in df_opd for the same date and matching demographics
 
         Parameters
@@ -184,6 +209,8 @@ class OIS_Matcher:
             See check_for_match for what keyword arguments are available and their defintions
         test_cols : list[str]
             List of columns to use when looking for duplicate rows in df_opd
+        date_matcher : Date_Matcher
+            Date_Matcher object that describes how close the dates must be to be a match
 
         Returns
         -------
@@ -194,7 +221,7 @@ class OIS_Matcher:
 
         logger = logging.getLogger("ois")
         for j, row_mpv in self.df_mpv_agency.iterrows():
-            df_matches = find_date_matches(df_opd, date_col, row_mpv[date_col])
+            df_matches = df_opd[date_matcher.match(df_opd[date_col], row_mpv[date_col])]
 
             if len(df_matches)==0:
                 continue
@@ -715,15 +742,18 @@ def filter_by_date(df_test, date_col, min_date):
     return df_test
 
 
-def find_date_matches(df_test, date_col, date):
-    date = date.replace(hour=0, minute=0, second=0)
-    if isinstance(df_test[date_col].dtype, pd.PeriodDtype):
-        df_matches = df_test[(df_test[date_col].dt.start_time <= date) & (df_test[date_col].dt.end_time >= date)]
-    else:
-        dates_test = df_test[date_col].dt.tz_localize(None).apply(lambda x: x.replace(hour=0, minute=0, second=0))
-        df_matches = df_test[dates_test == date]
+def match_date(dates, date_comp):
+    date_comp = date_comp.replace(hour=0, minute=0, second=0)
+    try:
+        date_comp = date_comp.tz_localize(None)
+    except:
+        pass
 
-    return df_matches
+    if isinstance(dates.dtype, pd.PeriodDtype):
+        return (dates.dt.start_time <= date_comp) & (dates.dt.end_time >= date_comp)
+    else:
+        dates_test = dates.dt.tz_localize(None).apply(lambda x: x.replace(hour=0, minute=0, second=0))
+        return dates_test == date_comp
 
 
 def get_race_col(df):
