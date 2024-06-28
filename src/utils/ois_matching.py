@@ -42,8 +42,8 @@ gender_vals = gender_vals.values()
 
 @dataclass
 class Date_Matcher:
-    max_diff = None # If None, dates must match. Otherwise, dates will match if difference between dates is within this value
-    allow_month_error = False  # If True, dates will be also be considered to match if year and day are the same but the month is off by 1 (perhaps due to typo)
+    max_diff: Optional[str] = None # If None, dates must match. Otherwise, dates will match if difference between dates is within this value
+    allow_month_error: bool = False  # If True, dates will be also be considered to match if year and day are the same but the month is off by 1 (perhaps due to typo)
 
     def match(self, dates, date_comp):
         if self.max_diff:
@@ -51,12 +51,13 @@ class Date_Matcher:
         else:
             test = match_date(dates, date_comp)
 
-        if self.allow_month_error:
-            if isinstance(dates.dtype, pd.api.types.PeriodDtype):
-                raise NotImplementedError()
+        if self.allow_month_error and not isinstance(dates.dtype, pd.api.types.PeriodDtype):
             
             year_matches = dates.dt.year == date_comp.year
-            day_matches = dates.dt.day == date_comp.day
+            if isinstance(dates.dtype, pd.api.types.PeriodDtype): # This is monthly period data
+                day_matches = pd.Series(True, dates.index)
+            else:
+                day_matches = dates.dt.day == date_comp.day
 
             test = test | (year_matches & day_matches & (
                     abs(dates.dt.month - date_comp.month)==1   # Likely typo in month
@@ -240,7 +241,9 @@ class OIS_Matcher:
                 if self.addr_col:
                     test_cols_reduced = test_cols.copy()
                     test_cols_reduced.remove(self.addr_col)
-                    [test_cols_reduced.remove(x) for x in summary_col]
+                    for x in summary_col:
+                        if x in test_cols_reduced:
+                            test_cols_reduced.remove(x)
                     if len(drop_duplicates(df_matches[is_match], subset=test_cols_reduced, ignore_null=True, ignore_date_errors=True))==1:
                         # These are the same except for the address. Check if the addresses are similar
                         addr_match = street_match(df_matches[is_match][self.addr_col].iloc[0], self.addr_col, 
@@ -360,7 +363,7 @@ class OIS_Matcher:
                         # Likely error in the month that was recorded
                         df_opd = df_opd.drop(index=df_opd[is_match].index)
                         mpv_matched[j] = True
-                    elif self.error=='raise' and addr_match:
+                    elif self.error=='raise' and addr_match and ((df_matches[date_col]-row_match[date_col]).abs() < '32d').iloc[0]:
                         raise NotImplementedError()
 
         return df_opd, mpv_matched
@@ -1123,6 +1126,8 @@ def street_match(address, col_name, col, notfound='ignore', match_addr_null=Fals
     addr_tags, addr_type = address_parser.tag(address, location=location, col_name=col_name, error=notfound)
     
     matches = pd.Series(False, index=col.index, dtype='object')
+    if pd.isnull(address):
+        return matches
     if isinstance(addr_tags, list):
         for t in addr_tags:
             matches |= street_match(" ".join(t.values()), col_name, col, notfound, match_addr_null, match_col_null)

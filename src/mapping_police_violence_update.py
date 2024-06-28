@@ -54,6 +54,12 @@ unexpected_conditions = 'raise'   # 'raise' or 'ignore'. If 'raise', an error wi
 # The pairs below will be considered equivalent when allowed_replacements is used
 allowed_replacements = {'race':[["HISPANIC/LATINO","INDIGENOUS"],["HISPANIC/LATINO","WHITE"],["HISPANIC/LATINO","BLACK"]],
                         'gender':[['TRANSGENDER','MALE'],['TRANSGENDER','FEMALE']]}
+
+date_matcher = ois_matching.Date_Matcher(  # This defines how dates are matched in the 1st matching stage. 
+    max_diff='1d',  # Allow matching dates to differ by a day to handle frequent cases where dates differ between datasets
+    allow_month_error=True  # Allow cases to match if month is off by 1 and year and date match. Occasional typos in months have been observed.
+)
+
 merge_county = True  # If true, will also include other parts of county in main search for matches
 cross_ref_agencies = {  # Mapping of agencies whose datasets are known to contain data from other agencies
     'Bloomington':'Owen County',
@@ -197,7 +203,7 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
             # First find cases that have the same date and then check demographics and possibly zip code. Remove matches.
             df_opd, mpv_matched, subject_demo_correction, match_with_age_diff = matcher.remove_matches_date_match_first(
                 df_opd, mpv_matched, subject_demo_correction, match_with_age_diff, a, 
-                test_cols)
+                test_cols, date_matcher=date_matcher)
         
         # First find cases that have the same demographics and then check if date is close and street matches (if there is an address column).
         #  Remove matches.
