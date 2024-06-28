@@ -2,7 +2,7 @@ import re
 from .ois_matching import split_words
 from openpolicedata.defs import states
 import pandas as pd
-from typing import Literal
+from typing import Literal, Optional
 
 agency_words = ['Area','Rapid','Transit', 'Police', 'Department','Crisis', "Sheriff", 
                         'Township', 'Bureau', 'State', 'University', 'Public', 'Safety',
@@ -105,7 +105,9 @@ def filter_state(df, state_col, state):
 
 def filter_agency(agency: str, agency_partial:str, agency_type:str, state:str, 
                   df: pd.DataFrame, agency_col:str, state_col:str, 
-                delim:str=',', exact:bool=False, logger=None, error='ignore'):
+                  merge_county: bool, county_col: str,
+                  cross_ref_agencies: Optional[dict] = None,
+                  delim:str=',', exact:bool=False, logger=None, error='ignore'):
     """Filter table for rows likely corresponding to an agency
 
     Parameters
@@ -124,6 +126,12 @@ def filter_agency(agency: str, agency_partial:str, agency_type:str, state:str,
         Agency column of table
     state_col : str
         State column of table
+    merge_county : bool
+        If true, will also include other parts of county in DataFrame that is returned
+    county_col : str
+        County column of table
+    cross_ref_agencies : dict, optional
+        Dictionary of data agencies keys that map to other agencies (str, list) contained in that agency's data
     delim : str, optional
         Delimiter separating agencies for rows containing multiple agencies, by default ','
     exact : bool, optional
@@ -143,14 +151,17 @@ def filter_agency(agency: str, agency_partial:str, agency_type:str, state:str,
     agency_partial = agency_partial.lower().strip().replace("&", 'and')
     agency_type = agency_type.lower().strip().replace("&", 'and')
     
-    agencies_comp = df[agency_col].str.lower().str.replace("&", 'and')
-    agencies_comp = agencies_comp.str.replace("^"+state_abbrev(state).lower()+" ", full_state_name(state).lower()+" ", regex=True)
+    agencies_all = df[agency_col].str.lower().str.replace("&", 'and')
+    agencies_all = agencies_all.str.replace("^"+state_abbrev(state).lower()+" ", full_state_name(state).lower()+" ", regex=True)
+
+    if merge_county:
+        agency_partial = re.sub(r'\scounty\b','',agency_partial)
     
-    agency_matches = (agencies_comp.apply(str).str.contains(agency_partial)) & \
+    agency_matches = (agencies_all.apply(str).str.contains(agency_partial)) & \
         df[state_col].apply(state_equals, args=(state,))
         
     df_agency = df[agency_matches]
-    agencies_comp = agencies_comp[agency_matches]
+    agencies_comp = agencies_all[agency_matches]
 
     if len(agency_partial)==0:
         agency_matches = agencies_comp.str.endswith(agency)
@@ -182,4 +193,21 @@ def filter_agency(agency: str, agency_partial:str, agency_type:str, state:str,
 
     if len(keep)==0 and logger:
         logger.debug(f"No MPV shootings found for {agency}")
-    return df_agency.loc[keep]
+
+    df_agency = df_agency.loc[keep]
+
+    if merge_county and county_col and len(df_agency)>0:
+        df_county = df[(df[county_col]==df_agency[county_col].mode().iloc[0]) & (df[state_col]==df_agency[state_col].mode().iloc[0])]
+        df_agency = pd.concat([df_agency, df_county])
+        df_agency = df_agency[~df_agency.index.duplicated()]
+
+    if cross_ref_agencies and any(key:=[x for x in cross_ref_agencies.keys() if agency_partial in x.lower()]):
+         cross_refs = cross_ref_agencies[key[0]]
+         cross_refs = [cross_refs] if isinstance(cross_refs, str) else cross_refs
+         for c in cross_refs:
+            agency_matches = (agencies_all.apply(str).str.contains(c.lower())) & \
+                df[state_col].apply(state_equals, args=(state,))
+            df_agency = pd.concat([df_agency, df[agency_matches]])
+            df_agency = df_agency[~df_agency.index.duplicated()]
+
+    return df_agency

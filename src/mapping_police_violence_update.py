@@ -35,6 +35,7 @@ min_date = None   # Cases will be ignored before this date. If None, min_date wi
 mpv_addr_col = "Street Address of Incident"
 mpv_state_col = 'State'
 mpv_agency_col = "Agency responsible for death"
+mpv_county_col = 'County'
 
 # Parameters that affect which cases are logged
 include_unknown_fatal = False  # Whether to include cases where there was a shooting but it is unknown if it was fatal 
@@ -49,10 +50,15 @@ unexpected_conditions = 'raise'   # 'raise' or 'ignore'. If 'raise', an error wi
 
 # There are sometimes demographic differences between MPV and other datasets for the same case
 # If a perfect demographics match is not found, an attempt can be made to allow differences in race and gender values
-# when trying to find a case with matching demographics. The below cases have been identified  as differing in some cases.
+# when trying to find a case with matching demographics. The below cases have been identified as differing in some cases that should have matched.
 # The pairs below will be considered equivalent when allowed_replacements is used
 allowed_replacements = {'race':[["HISPANIC/LATINO","INDIGENOUS"],["HISPANIC/LATINO","WHITE"],["HISPANIC/LATINO","BLACK"]],
                         'gender':[['TRANSGENDER','MALE'],['TRANSGENDER','FEMALE']]}
+merge_county = True  # If true, will also include other parts of county in main search for matches
+cross_ref_agencies = {  # Mapping of agencies whose datasets are known to contain data from other agencies
+    'Bloomington':'Owen County',
+    'Norfolk': 'Virginia Beach'
+}
     
 ####################################################################
 
@@ -165,9 +171,12 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
 
         # Get the location (agency_partial) and type (police department, sheriff's office, etc.) from the full agency name
         agency_partial, agency_type = agencyutils.split(agency, row_dataset['State'], unknown_type=unexpected_conditions)
+
         # Only keep rows that might correspond to the current agency
         df_mpv_agency = agencyutils.filter_agency(agency, agency_partial, agency_type, row_dataset['State'], 
-                                             df_mpv, agency_col, mpv_state_col, logger=logger, error=unexpected_conditions)
+                                             df_mpv, agency_col, mpv_state_col, merge_county, mpv_county_col,
+                                             cross_ref_agencies=cross_ref_agencies,
+                                             logger=logger, error=unexpected_conditions)
         
         # Match OPD cases to MPV cases starting with strictest match requirements and then
         # with progressively more relaxed requirements. There are frequent differences between
