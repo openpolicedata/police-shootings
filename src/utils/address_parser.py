@@ -370,12 +370,19 @@ def _address_search(p, x, error='ignore'):
 
     return m
 
-def _check_result(result, usa_result, col_name=None):
+def _check_result(address_string, result, usa_result, col_name=None):
     if result==usa_result:
         return True
+    if 'town e blvd' in address_string.lower():
+        # This is a known issue where we are including the e in the street name and 
+        # usaddress is including it as a postdirectional. Town East is a mall so leaving it as part of the street name
+        # unless similar cases are found
+        return True
     if result[1]=='Intersection':
-        if usa_result[1]=='Ambiguous' and 'IntersectionSeparator' in result[0] or \
-            'near' in result[0]['IntersectionSeparator'].lower():
+        if (usa_result[1]=='Ambiguous' and 'IntersectionSeparator' in result[0] or \
+            'near' in result[0]['IntersectionSeparator'].lower()) or \
+            (usa_result[1]=='Street Address' and 'AddressNumber' in usa_result[0] and not usa_result[0]['AddressNumber'].isdigit()) or \
+            ('CornerOf' in usa_result[0] and 'corner' not in usa_result[0]['CornerOf'].lower()):
             # usaddress misintepretation of street intersection without post type
             # such as 'Columbia and North Fessenden'
             return True
@@ -581,6 +588,6 @@ def _get_address_result(results, name, address_string=None, type_check=None, col
                 raise NotImplementedError()
         elif check_ambiguous and usa_result[1]=='Ambiguous':
             pass
-        elif error=='raise' and address_string and not _check_result(result, usa_result, col_name):
+        elif error=='raise' and address_string and not _check_result(address_string, result, usa_result, col_name):
             raise NotImplementedError()
     return result
