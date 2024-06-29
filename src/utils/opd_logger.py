@@ -78,7 +78,7 @@ def log(df: pd.DataFrame,
             df = df_combo.loc[len(df_old):].drop(columns=date_cols_added)
 
     if len(df)==0:
-        return
+        return pd.DataFrame(columns=df.columns)
 
     if os.path.exists(output_name):
         df_out = pd.concat([pd.read_csv(output_name, keep_default_na=False, na_values={'',np.nan}), df], ignore_index=True)
@@ -86,6 +86,8 @@ def log(df: pd.DataFrame,
         df_out = df.copy()
 
     df_out.to_csv(output_name, index=False)
+
+    return df
 
 def generate_general_output_data(df_save:pd.DataFrame, addr_col: str, name_col: str):
     """Create a table with general columns specific to all agencies containing cases that may not already be in MPV

@@ -235,7 +235,7 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
         if len(df_save)>0:
             # Save data specific to this source if it has not previously been saved
             source_basename = f"{row_dataset['SourceName']}_{row_dataset['State']}_{row_dataset['TableType']}_{row_dataset['Year']}"
-            opd_logger.log(df_save, output_dir, source_basename, keys=keys, add_date=True, only_diffs=True)
+            df_save_logged = opd_logger.log(df_save, output_dir, source_basename, keys=keys, add_date=True, only_diffs=True)
 
             # Create a table with general columns applicable to all agencies that may not already be in MPV
             df_global = opd_logger.generate_general_output_data(df_save, addr_col, name_col)
@@ -244,9 +244,11 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
             global_basename = 'Potential_MPV_Updates_Global'
             keys = ["MPV ID", 'type', 'known_fatal', 'OPD Date','OPD Agency','OPD Race', 'OPD Gender','OPD Age','OPD Address']
             # Save general data to global file containing data for all OPD datasets
-            opd_logger.log(df_global, output_dir, global_basename, keys=keys, add_date=True, only_diffs=True)
+            df_global_logged = opd_logger.log(df_global, output_dir, global_basename, keys=keys, add_date=True, only_diffs=True)
+
+            assert (df_global_logged.reset_index()['OPD Date'] == df_save_logged.reset_index()['DATE']).all()
 
             opd_logger.log_possible_matches(output_dir, 'Possible_Matches', 
-                                            df_global, df_save, df_mpv, 
+                                            df_global_logged, df_save_logged, df_mpv, 
                                             agency_partial, row_dataset['State'],
                                             mpv_addr_col, addr_col, add_date=True)
