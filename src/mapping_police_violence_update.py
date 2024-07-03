@@ -3,14 +3,7 @@ import os, sys
 file_loc = sys.path[0]
 sys.path.append(os.path.dirname(file_loc))  # Add current file directory to path
 
-try:
-    import openpolicedata as opd
-except:
-    # Dev mode
-    sys.path.append(os.path.join(os.path.dirname(os.path.dirname(file_loc)),'openpolicedata'))
-    import openpolicedata as opd
-    opd_csv_file = r"..\opd-data\opd_source_table.csv"
-    opd.datasets.reload(opd_csv_file)
+import openpolicedata as opd
 
 from src.utils import address_parser
 from src.utils  import agencyutils
@@ -46,7 +39,7 @@ keep_self_inflicted = False   # Whether to keep cases that are marked self-infli
 # Logging and restarting parameters
 istart = 1  # 1-based index (same as log statements) to start at in OPD datasets. Can be useful for restarting. Set to 1 to start from beginning.
 logging_level = logging.INFO  # Logging level. Change to DEBUG for some additional messaging.
-unexpected_conditions = 'raise'   # 'raise' or 'ignore'. If 'raise', an error will be thrown when a condition occurs that was not previously identified in testing.
+unexpected_conditions = 'ignore'   # 'raise' or 'ignore'. If 'raise', an error will be thrown when a condition occurs that was not previously identified in testing.
 
 # There are sometimes demographic differences between MPV and other datasets for the same case
 # If a perfect demographics match is not found, an attempt can be made to allow differences in race and gender values
