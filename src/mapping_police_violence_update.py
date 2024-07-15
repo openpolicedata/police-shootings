@@ -102,7 +102,7 @@ for t in tables_to_use:
 opd_datasets = pd.concat(opd_datasets, ignore_index=True)
 logger.info(f"{len(opd_datasets)} officer-involved shootings or use of force datasets found in OPD")
 
-total_fatal_opd = 0
+total_fatal_opd = total_found = 0
 
 for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop over OPD OIS datasets
     logger.info(f'Running {k+1} of {len(opd_datasets)}: {row_dataset["SourceName"]} {row_dataset["TableType"]} {row_dataset["Year"] if row_dataset["Year"]!="MULTIPLE" else ""}')
@@ -118,7 +118,7 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
             raise ValueError(f"{row_dataset['TableType']} dataset for the year {row_dataset['Year']} not available for {row_dataset['SourceName']}, {row_dataset['State']}")
         else:
             # Website where the data exists is likely down
-            print(f"{row_dataset['TableType']} dataset for the year {row_dataset['Year']} not available for {row_dataset['SourceName']}, {row_dataset['State']}. "+
+            logger.info(f"{row_dataset['TableType']} dataset for the year {row_dataset['Year']} not available for {row_dataset['SourceName']}, {row_dataset['State']}. "+
                   "The website may be temporarily unavailable.")
             continue
     opd_table.standardize(agg_race_cat=True)  # Standardize data
@@ -151,7 +151,7 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
                                                   include_unknown_fatal, keep_self_inflicted)
     
     total_fatal_opd += len(df_opd_all)
-    print(total_fatal_opd)
+    logger.debug(f"\tFatal Cases: {len(df_opd_all)}")
 
     if len(df_opd_all)==0:
         continue  # No data. Move to the next dataset
@@ -225,6 +225,8 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
         df_save, keys = opd_logger.generate_agency_output_data(df_mpv_agency, df_opd, mpv_addr_col, addr_col, name_col,
                                 log_demo_diffs, subject_demo_correction, log_age_diffs, match_with_age_diff, agency, known_fatal)
         
+        total_found += len(df_save)
+        logger.debug(f"\tIdentfied Cases: {len(df_save)}")
         if len(df_save)>0:
             # Save data specific to this source if it has not previously been saved
             source_basename = f"{row_dataset['SourceName']}_{row_dataset['State']}_{row_dataset['TableType']}_{row_dataset['Year']}"
@@ -245,3 +247,5 @@ for k, row_dataset in opd_datasets.iloc[max(1,istart)-1:].iterrows():  # Loop ov
                                             df_global_logged, df_save_logged, df_mpv, 
                                             agency_partial, row_dataset['State'],
                                             mpv_addr_col, addr_col, add_date=True)
+
+logger.debug(f"{total_found} cases identified out of {total_fatal_opd}")

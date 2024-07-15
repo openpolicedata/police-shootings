@@ -54,7 +54,7 @@ def find_address_col(df_test: pd.DataFrame, location: Optional[str] = None, erro
                     continue
                 tags = df_test[col].apply(lambda x: tag(x, location, col, error='ignore'))
             except AttributeError as e:
-                if (error=='ignore') or (len(e.args)>0 and e.args[0]=="'bool' object has no attribute 'strip'"):
+                if (error=='ignore') or (len(e.args)>0 and "object has no attribute 'strip'" in e.args[0]):
                     continue
                 else:
                     raise

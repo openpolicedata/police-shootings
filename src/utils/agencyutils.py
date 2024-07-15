@@ -1,5 +1,5 @@
 import re
-from .ois_matching import split_words
+from .tools import split_words
 from openpolicedata.defs import states
 import pandas as pd
 from typing import Literal, Optional

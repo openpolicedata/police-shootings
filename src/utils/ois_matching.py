@@ -12,6 +12,7 @@ import warnings
 
 from . import address_parser
 from . import agencyutils
+from .tools import split_words
 
 # Suppressing known warnings
 warnings.filterwarnings(action='ignore', category=UserWarning, message='Identified difference in column names when combining sheets')
