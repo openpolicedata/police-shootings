@@ -9,9 +9,7 @@ Currently, this tool is implemented for Mapping Police Violence, but we intend t
 ## Access the Code
 [Clone](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) the OPD Police Shootings repository with [Git](https://git-scm.com/):
 
-```
 > git clone git@github.com:openpolicedata/police-shootings.git
-```
 
 OR
 
@@ -19,12 +17,13 @@ Download the OpenPoliceData Police Shootings repository [here](https://github.co
 
 ## Setup the Environment
 Navigate to the police-shootings folder in a command prompt and run:
-```
-pip install -r requirements.txt
-```
+
+> pip install -r requirements.txt
 
 # Running the code
-A script for comparing OPD datasets to the Mapping Police Violence database is located in [src\mapping_police_violence_update.py](https://github.com/openpolicedata/police-shootings/blob/main/src/mapping_police_violence_update.py). The code contains parameters at the top of the file that can be updated as needed. 
+A script for comparing OPD datasets to the Mapping Police Violence database is located in [src\mapping_police_violence_update.py](https://github.com/openpolicedata/police-shootings/blob/main/src/mapping_police_violence_update.py). The code contains parameters at the top of the file that can be updated as needed. From the src folder, run:
+
+> python -m mapping_police_violence_update
 
 When the code is run, it will compare OPD data against Mapping Police Violence's data. It will report on cases identified as not being in Mapping Police Violence AND that have not been reported on previously. Thus, this tool can be run periodically to check if the most recent cases added to OPD datasets are not in Mapping Police Violence. To enable this feature, it is important to not delete past output from the tool and to always output to the same folder.
 
