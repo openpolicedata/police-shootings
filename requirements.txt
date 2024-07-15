@@ -1,4 +1,4 @@
-openpolicedata[optional]>=0.7.1
+openpolicedata[optional]>=0.7.2
 pandas
 usaddress
 rapidfuzz

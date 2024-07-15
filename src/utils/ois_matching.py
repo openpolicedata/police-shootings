@@ -1,3 +1,4 @@
+from datetime import timedelta
 from rapidfuzz import fuzz
 from itertools import product
 from dataclasses import dataclass
@@ -52,17 +53,17 @@ class Date_Matcher:
         else:
             test = match_date(dates, date_comp)
 
-        if self.allow_month_error and not isinstance(dates.dtype, pd.api.types.PeriodDtype):
-            
-            year_matches = dates.dt.year == date_comp.year
-            if isinstance(dates.dtype, pd.api.types.PeriodDtype): # This is monthly period data
-                day_matches = pd.Series(True, dates.index)
-            else:
+        if self.allow_month_error and not isinstance(dates.dtype, pd.api.types.PeriodDtype): 
+            if pd.api.types.is_datetime64_any_dtype(dates):
+                year_matches = dates.dt.year == date_comp.year
                 day_matches = dates.dt.day == date_comp.day
+                month_matches = abs(dates.dt.month - date_comp.month)==1
+            else:
+                year_matches = dates.apply(lambda x: x.year==date_comp.year if not isinstance(x,pd.Period) else False)
+                day_matches  = dates.apply(lambda x: x.day==date_comp.day if not isinstance(x,pd.Period) else False)
+                month_matches  = dates.apply(lambda x: abs(x.month-date_comp.month)==1 if not isinstance(x,pd.Period) else False)
 
-            test = test | (year_matches & day_matches & (
-                    abs(dates.dt.month - date_comp.month)==1   # Likely typo in month
-                    ))
+            test = test | (year_matches & day_matches & month_matches)
 
         return test
 
@@ -223,6 +224,9 @@ class OIS_Matcher:
 
         logger = logging.getLogger("ois")
         for j, row_mpv in self.df_mpv_agency.iterrows():
+            if len(df_opd)==0:
+                break
+
             df_matches = df_opd[date_matcher.match(df_opd[date_col], row_mpv[date_col])]
 
             if len(df_matches)==0:
@@ -241,7 +245,8 @@ class OIS_Matcher:
                 summary_col = [x for x in df_matches.columns if 'summary' in x.lower()]
                 if self.addr_col:
                     test_cols_reduced = test_cols.copy()
-                    test_cols_reduced.remove(self.addr_col)
+                    if self.addr_col in test_cols_reduced:
+                        test_cols_reduced.remove(self.addr_col)
                     for x in summary_col:
                         if x in test_cols_reduced:
                             test_cols_reduced.remove(x)
@@ -256,6 +261,9 @@ class OIS_Matcher:
                         throw = addr_match.sum()!=1
                         if not throw:
                             is_match = addr_match
+                        elif (date_type_match:=df_matches[is_match][addr_match][date_col].apply(lambda x: not isinstance(x, pd.Period))).sum()==1:
+                            is_match = addr_match & date_type_match
+                            throw = False
                 elif zipcode_isequal(row_mpv, df_matches[is_match], count=1):
                 # elif zip_col and zip_col and (m:=row_match[zip_col]==df_matches[is_match][zip_col]).sum()==1:
                     is_match.loc[is_match] = row_mpv[zip_col]==df_matches[is_match][zip_col]
@@ -593,37 +601,12 @@ def zipcode_isequal(df1, df2, loc1=None, loc2=None, count=None, iloc1=None, iloc
     else:
         return False
 
-def split_words(string, case=None):
-    # Split based on spaces, punctuation, and camel case
-    words = list(re.split(r"[^A-Za-z\d]+", string))
-    k = 0
-    while k < len(words):
-        if len(words[k])==0:
-            del words[k]
-            continue
-        new_words = opd.utils.camel_case_split(words[k])
-        words[k] = new_words[0]
-        for j in range(1, len(new_words)):
-            words.insert(k+1, new_words[j])
-            k+=1
-        k+=1
-
-    if case!=None:
-        if case.lower()=='lower':
-            words = [x.lower() for x in words]
-        elif case.lower()=='upper':
-            words = [x.upper() for x in words]
-        else:
-            raise ValueError("Unknown input case")
-
-    return words
-
 
 def drop_duplicates(df, subset=None, ignore_null=False, ignore_date_errors=False):
     subset = subset if subset else df.columns
     if opd.Column.DATE in df and not isinstance(df[opd.Column.DATE].dtype, pd.PeriodDtype):
         df = df.copy()
-        df[opd.Column.DATE] = df[opd.Column.DATE].apply(lambda x: x.replace(hour=0, minute=0, second=0))
+        df[opd.Column.DATE] = df[opd.Column.DATE].apply(lambda x: x.replace(hour=0, minute=0, second=0) if not isinstance(x, pd.Period) else x)
 
     try:
         df = df.drop_duplicates(subset=subset, ignore_index=True)
@@ -674,21 +657,66 @@ def drop_duplicates(df, subset=None, ignore_null=False, ignore_date_errors=False
     return df
 
 
-def in_date_range(dt1, dt2, max_delta=None, min_delta=None):
-    count1 = count2 = 1
-    if is_series1:=isinstance(dt1, pd.Series):
-        count1 = len(dt1)
-        if is_timestamp1:=not isinstance(dt1.dtype, pd.api.types.PeriodDtype):
-            dt1 = dt1.dt.tz_localize(None)
-    elif is_timestamp1:=isinstance(dt1, pd.Timestamp):
-        dt1 = dt1.tz_localize(None)
+def _localize(dt):
+    if is_series:=isinstance(dt, pd.Series):
+        if not isinstance(dt.dtype, pd.api.types.PeriodDtype):
+            if pd.api.types.is_object_dtype(dt):
+                dt = dt.apply(lambda x: x.tz_localize(None) if not isinstance(x,pd.Period) else x)
+            else:
+                dt = dt.dt.tz_localize(None)
+    elif isinstance(dt, pd.Timestamp):
+        dt = dt.tz_localize(None)
 
-    if is_series2:=isinstance(dt2, pd.Series):
+    return dt, is_series
+
+def _to_delta(x):
+    if x[-1]=='d':
+        return timedelta(days=int(x[:-1]))
+    else:
+        raise NotImplementedError()
+
+def _date_comp_lt(dt1, dt2, max_delta):
+    max_delta = _to_delta(max_delta)
+    is_timestamp1 = not isinstance(dt1, pd.Period)
+    is_timestamp2 = not isinstance(dt2, pd.Period)
+    if not is_timestamp1 and not is_timestamp2:
+        raise NotImplementedError()
+    elif not is_timestamp2:
+        return (((dt2.end_time >= dt1) & (dt2.start_time <= dt1)) | \
+            (abs(dt2.end_time - dt1)<=max_delta) | (abs(dt2.start_time - dt1)<=max_delta))
+    elif not is_timestamp1:
+        return (((dt1.end_time >= dt2) & (dt1.start_time <= dt2)) | \
+            (abs(dt1.end_time - dt2)<=max_delta) | (abs(dt1.start_time - dt2)<=max_delta))
+    else:
+        return (abs(dt1 - dt2)<=max_delta)
+    
+def _date_comp_gt(dt1, dt2, min_delta):
+    min_delta = _to_delta(min_delta)
+    is_timestamp1 = not isinstance(dt1, pd.Period)
+    is_timestamp2 = not isinstance(dt2, pd.Period)
+    if not is_timestamp1 and not is_timestamp2:
+        raise NotImplementedError()
+    elif not is_timestamp2:
+        return (((dt2.end_time >= dt1) & (dt2.start_time <= dt1)) | \
+            (abs(dt2.end_time - dt1)>=min_delta) | (abs(dt2.start_time - dt1)>=min_delta))
+    elif not is_timestamp1:
+        return (((dt1.end_time >= dt2) & (dt1.start_time <= dt2)) | \
+            (abs(dt1.end_time - dt2)>=min_delta) | (abs(dt1.start_time - dt2)>=min_delta))
+    else:
+        return (abs(dt1 - dt2)>=min_delta)
+
+
+def in_date_range(dt1, dt2, max_delta=None, min_delta=None):
+    
+    dt1, is_series1 = _localize(dt1)
+    dt2, is_series2 = _localize(dt2)
+
+    count1 = count2 = 1
+    if isinstance(dt1, pd.Series):
+        count1 = len(dt1)
+
+    if isinstance(dt2, pd.Series):
         count2 = len(dt2)
-        if is_timestamp2:=not isinstance(dt2.dtype, pd.api.types.PeriodDtype):
-            dt2 = dt2.dt.tz_localize(None)
-    elif is_timestamp2:=isinstance(dt2, pd.Timestamp):
-        dt2 = dt2.tz_localize(None)
 
     if count1!=count2 and not (count1==1 or count2==1):
         raise ValueError("Date inputs are different sizes")
@@ -701,46 +729,37 @@ def in_date_range(dt1, dt2, max_delta=None, min_delta=None):
         matches = True
 
     if max_delta:
-        if not is_timestamp1 and not is_timestamp2:
-            raise NotImplementedError()
-        elif not is_series2 and not is_timestamp2:
-            matches = matches & (((dt2.end_time >= dt1) & (dt2.start_time <= dt1)) | \
-                ((dt2.end_time - dt1).abs()<=max_delta) | ((dt2.start_time - dt1).abs()<=max_delta))
-        elif not is_series1 and not is_timestamp1:
-            matches = matches & (((dt1.end_time >= dt2) & (dt1.start_time <= dt2)) | \
-                ((dt1.end_time - dt2).abs()<=max_delta) | ((dt1.start_time - dt2).abs()<=max_delta))
-        elif is_series2 and not is_timestamp2:
-            matches = matches & (((dt2.dt.end_time >= dt1) & (dt2.dt.start_time <= dt1)) | \
-                ((dt2.dt.end_time - dt1).abs()<=max_delta) | ((dt2.dt.start_time - dt1).abs()<=max_delta))
-        elif is_series1 and not is_timestamp1:
-            matches = matches & (((dt1.dt.end_time >= dt2) & (dt1.dt.start_time <= dt2)) | \
-                ((dt1.dt.end_time - dt2).abs()<=max_delta) | ((dt1.dt.start_time - dt2).abs()<=max_delta))
+        if is_series1 and is_series2:
+            matches = pd.Series([_date_comp_lt(x, y, max_delta) for x,y in zip(dt1, dt2)], index=dt2.index)
+        elif is_series1:
+            matches = dt1.apply(_date_comp_lt, args=(dt2, max_delta))
+        elif is_series2:
+            matches = dt2.apply(_date_comp_lt, args=(dt1, max_delta))
         else:
-            matches = matches & ((dt1 - dt2).abs()<=max_delta)
+            matches = _date_comp_lt(dt1, dt2, max_delta)
         
     if min_delta:
-        if not is_timestamp1 and not is_timestamp2:
-            raise NotImplementedError()
-        elif not is_series2 and not is_timestamp2:
-            matches = matches & (((dt2.end_time >= dt1) & (dt2.start_time <= dt1)) | \
-                ((dt2.end_time - dt1).abs()>=min_delta) | ((dt2.start_time - dt1).abs()>=min_delta))
-        elif not is_series1 and not is_timestamp1:
-            matches = matches & (((dt1.end_time >= dt2) & (dt1.start_time <= dt2)) | \
-                ((dt1.end_time - dt2).abs()>=min_delta) | ((dt1.start_time - dt2).abs()>=min_delta))
-        elif is_series2 and not is_timestamp2:
-            matches = matches & (((dt2.dt.end_time >= dt1) & (dt2.dt.start_time <= dt1)) | \
-                ((dt2.dt.end_time - dt1).abs()>=min_delta) | ((dt2.dt.start_time - dt1).abs()>=min_delta))
-        elif is_series1 and not is_timestamp1:
-            matches = matches & (((dt1.dt.end_time >= dt2) & (dt1.dt.start_time <= dt2)) | \
-                ((dt1.dt.end_time - dt2).abs()>=min_delta) | ((dt1.dt.start_time - dt2).abs()>=min_delta))
+        if is_series1 and is_series2:
+            matches = matches & pd.Series([_date_comp_gt(x, y, min_delta) for x,y in zip(dt1, dt2)], index=dt2.index)
+        elif is_series1:
+            matches = matches & dt1.apply(_date_comp_gt, args=(dt2, min_delta))
+        elif is_series2:
+            matches = matches & dt2.apply(_date_comp_gt, args=(dt1, min_delta))
         else:
-            matches = matches & ((dt1 - dt2).abs()>=min_delta)
+            matches = matches & _date_comp_gt(dt1, dt2, min_delta)
 
     return matches
 
 def filter_by_date(df_test, date_col, min_date):
     if isinstance(df_test[date_col].dtype, pd.PeriodDtype):
         df_test = df_test[df_test[date_col].dt.start_time >= min_date]
+    elif pd.api.types.is_object_dtype(df_test[date_col]):
+        def comp(x):
+            try:
+                return x.tz_localize(None) >= min_date
+            except:
+                return x.start_time >= min_date
+        df_test = df_test[df_test[date_col].apply(comp)]
     else:
         df_test = df_test[df_test[date_col].dt.tz_localize(None) >= min_date]
     return df_test
@@ -1077,7 +1096,7 @@ def columns_for_duplicated_check(opd_table, df_matches_raw):
         notin = ["officer", "narrative", "objectid", "incnum", 'text', ' hash', 
                  'firearm','longitude','latitude','rank', 'globalid','rin',
                  'description','force','ofc','sworn','emp','weapon','shots','reason',
-                 'perceived','armed','nature','level','number']
+                 'perceived','armed','nature','level','number','resistance']
         if c not in ignore_cols and c not in keep_cols and \
             ("ID" in [x.upper() for x in split_words(c)] or c.lower().startswith("off") or \
              any([x in c.lower() for x in notin]) or c.lower().startswith('raw_')):
