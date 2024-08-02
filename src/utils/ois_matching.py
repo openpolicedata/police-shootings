@@ -237,7 +237,7 @@ class OIS_Matcher:
             if is_match.any():
                 age_diff[is_match] = 'max_age_diff' in args.keys()
             else:
-                logger.debug(f"Matching date found in OPD for {row_mpv[date_col]} but demographics do not match")
+                logger.warning(f"Matching date found in OPD for {row_mpv[date_col]} but demographics do not match")
                 continue
 
             if is_match.sum()>1:
