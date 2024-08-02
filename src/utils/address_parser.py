@@ -504,12 +504,28 @@ def tag(address_string: str,
     assert error in ['raise','ignore']
     if pd.isnull(address_string):
         return ({}, "Null")
-    elif isinstance(address_string, dict):
+    
+    if isinstance(address_string, str) and \
+        re.search(r'^{.+:.+}$', address_string):
+        try:
+            # Potential JSON. Try to parse.
+            # Fix any errors in JSON
+            new_address_string = address_string.replace("'", '"')
+            new_address_string = re.sub(r'\"{',r'{', new_address_string)
+            new_address_string = re.sub(r'}\"',r'}', new_address_string)
+            address_string = json.loads(new_address_string)
+        except:
+            pass
+
+    if isinstance(address_string, dict):
         if 'human_address' not in address_string.keys():
             if sorted(address_string.keys())==['x','y']:
                 raise ValueError("Data appears to be an (x,y) location and not an address")
             raise KeyError("Unknown dictionary keys for address")
-        address_dict = json.loads(address_string['human_address'])
+        if not isinstance(address_string['human_address'], dict):
+            address_dict = json.loads(address_string['human_address'])
+        else:
+            address_dict = address_string['human_address']
         result = tag(address_dict['address'], location, col_name, error)
         if error=='raise' and not all([x in ['address','city','state','zip'] for x in address_dict]):
             raise NotImplementedError()
